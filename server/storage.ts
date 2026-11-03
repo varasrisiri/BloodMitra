@@ -29,6 +29,8 @@ export interface IStorage {
   verifyUser(id: string): Promise<User | undefined>;
   deleteUser(id: string): Promise<User | undefined>;
   updateUserStatus(id: string, data: { canDonate?: boolean; availabilityStatus?: boolean }): Promise<User | undefined>;
+  getHospitalCount(): Promise<number>;
+  createFirstHospitalAdmin(userData: any): Promise<User>;
 
   // Blood request operations
   createBloodRequest(data: InsertBloodRequest): Promise<BloodRequest>;
@@ -176,6 +178,42 @@ export class DatabaseStorage implements IStorage {
       .where(eq(users.id, id))
       .returning();
     return user;
+  }
+
+  async getHospitalCount(): Promise<number> {
+    const [res] = await db
+      .select({ count: sql<number>`count(*)` })
+      .from(users)
+      .where(eq(users.role, "hospital"));
+    return Number(res?.count || 0);
+  }
+
+  async createFirstHospitalAdmin(userData: any): Promise<User> {
+    return await db.transaction(async (tx) => {
+      // Transaction-level advisory lock serializes simultaneous first-admin creation attempts
+      await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext('hospital_admin_registration'))`);
+
+      const [res] = await tx
+        .select({ count: sql<number>`count(*)` })
+        .from(users)
+        .where(eq(users.role, "hospital"));
+
+      if (Number(res?.count || 0) > 0) {
+        throw new Error("HOSPITAL_EXISTS: A hospital administrator already exists. Public hospital registration is closed.");
+      }
+
+      const [user] = await tx
+        .insert(users)
+        .values({
+          ...userData,
+          role: "hospital",
+          isVerified: true,
+          createdByHospital: false,
+        } as UpsertUser)
+        .returning();
+
+      return user;
+    });
   }
 
   async updateUserStatus(id: string, data: { canDonate?: boolean; availabilityStatus?: boolean }): Promise<User | undefined> {

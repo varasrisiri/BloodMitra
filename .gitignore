@@ -15,9 +15,26 @@ uploads/
 /uploads/
 .local/
 
-# Logs & temporary files
+# Logs, database dumps & temporary files
 *.log
 *.tar.gz
+*.dump
+*.sql
+*.bak
+*.backup
+*.pem
+*.key
+*.cert
 vite.config.ts.*
 .DS_Store
 Thumbs.db
+
+# Database migration & local inspection utilities (do not commit to production repo)
+drizzle.neon.config.ts
+script/backup-local-db.ts
+script/final-read-only-audit.ts
+script/inspect-local-db.ts
+script/migrate-data-to-neon.ts
+script/test-neon.ts
+script/verify-neon-empty.ts
+script/verify-neon-schema.ts

@@ -1,8 +1,10 @@
 import type { Express } from "express";
 import { type Server } from "http";
+import path from "path";
+import fs from "fs";
 import { storage } from "./storage.js";
-import { setupAuth, isAuthenticated } from "./auth.js";
-import { type BloodGroup } from "../shared/schema";
+import { setupAuth, isAuthenticated, sanitizeUser } from "./auth.js";
+import { type BloodGroup, type User } from "../shared/schema";
 
 export async function registerRoutes(httpServer: Server, app: Express): Promise<Server> {
   // Auth middleware
@@ -32,7 +34,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
 
       const user = await storage.updateUser(userId, updateData);
 
-      res.json(user);
+      res.json(sanitizeUser(user));
     } catch (error) {
       console.error("Error updating user:", error);
       res.status(500).json({ message: "Failed to update user" });
@@ -48,7 +50,8 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         location: location as string,
         available: available === "true",
       });
-      res.json(donors);
+      // Donor search should never leak ID document references
+      res.json(donors.map((d) => ({ ...d, idDocumentUrl: null })));
     } catch (error) {
       console.error("Error fetching donors:", error);
       res.status(500).json({ message: "Failed to fetch donors" });
@@ -281,10 +284,67 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       }
 
       const allUsers = await storage.getAllUsers();
-      res.json(allUsers);
+      // Mask raw storage paths with authenticated proxy endpoint
+      res.json(allUsers.map(sanitizeUser));
     } catch (error) {
       console.error("Error fetching users:", error);
       res.status(500).json({ message: "Failed to fetch users" });
+    }
+  });
+
+  // Secure authenticated ID document access endpoint
+  // Only authorized hospital administrators (or the document owner) can access donor ID proofs
+  app.get("/api/hospital/users/:id/document", isAuthenticated, async (req: any, res) => {
+    try {
+      const requester = req.user as User;
+      const targetUserId = req.params.id;
+
+      // Strict Authorization Check: Only authorized hospital administrators can view donor ID documents
+      if (requester.role !== "hospital") {
+        return res.status(403).json({
+          message: "Access denied. Only authorized hospital administrators can view donor ID documents."
+        });
+      }
+
+      const targetUser = await storage.getUser(targetUserId);
+      if (!targetUser || !targetUser.idDocumentUrl) {
+        return res.status(404).json({ message: "ID document not found" });
+      }
+
+      const storedPathOrUrl = targetUser.idDocumentUrl;
+
+      // Strict security headers for document delivery
+      res.setHeader("Content-Type", "application/pdf");
+      res.setHeader("Content-Disposition", 'inline; filename="id_document.pdf"');
+      res.setHeader("X-Content-Type-Options", "nosniff");
+      res.setHeader("Cache-Control", "private, no-cache, no-store, must-revalidate");
+
+      if (storedPathOrUrl.startsWith("http://") || storedPathOrUrl.startsWith("https://")) {
+        // Stream from cloud storage (e.g. legacy Vercel Blob) through backend proxy
+        const blobRes = await fetch(storedPathOrUrl);
+        if (!blobRes.ok) {
+          return res.status(blobRes.status).json({ message: "Failed to retrieve document from storage." });
+        }
+        const arrayBuffer = await blobRes.arrayBuffer();
+        return res.send(Buffer.from(arrayBuffer));
+      } else {
+        // Stream from local private storage
+        const cleanPath = path.resolve(process.cwd(), storedPathOrUrl.replace(/^\//, ""));
+        const baseUploads = path.resolve(process.cwd(), "uploads");
+
+        // Prevent directory traversal
+        if (!cleanPath.startsWith(baseUploads)) {
+          return res.status(400).json({ message: "Invalid document path." });
+        }
+        if (!fs.existsSync(cleanPath)) {
+          return res.status(404).json({ message: "Document file not found on server." });
+        }
+        const fileStream = fs.createReadStream(cleanPath);
+        fileStream.pipe(res);
+      }
+    } catch (error) {
+      console.error("Error serving ID document:", error);
+      res.status(500).json({ message: "Failed to retrieve ID document" });
     }
   });
 

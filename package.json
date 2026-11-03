@@ -9,7 +9,15 @@
     "start": "node dist/index.cjs",
     "check": "tsc",
     "db:push": "drizzle-kit push",
-    "db:studio": "drizzle-kit studio"
+    "db:push:neon": "drizzle-kit push --config=drizzle.neon.config.ts",
+    "db:studio": "drizzle-kit studio",
+    "db:backup": "npx tsx script/backup-local-db.ts",
+    "test:neon": "npx tsx script/test-neon.ts",
+    "neon:check-empty": "npx tsx script/verify-neon-empty.ts",
+    "neon:verify-schema": "npx tsx script/verify-neon-schema.ts",
+    "neon:migrate": "npx tsx script/migrate-data-to-neon.ts --execute",
+    "test:security": "npx tsx script/test-security.ts",
+    "create:admin": "npx tsx script/create-admin.ts"
   },
   "dependencies": {
     "@hookform/resolvers": "^3.10.0",

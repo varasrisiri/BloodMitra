@@ -16,10 +16,15 @@ import { passwordResets, users } from "../shared/schema.js";
 import { eq, and, gt, isNull, ilike } from "drizzle-orm";
 import { isEmailConfigured, sendPasswordResetEmail } from "./email.js";
 
-// Configure multer for PDF uploads
+// Configure upload directories
 const uploadDir = "uploads";
-if (!process.env.VERCEL && !fs.existsSync(uploadDir)) {
-    fs.mkdirSync(uploadDir);
+const avatarsDir = path.join(uploadDir, "avatars");
+const privateDocsDir = path.join(uploadDir, "private_documents");
+
+if (!process.env.VERCEL) {
+    if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir);
+    if (!fs.existsSync(avatarsDir)) fs.mkdirSync(avatarsDir);
+    if (!fs.existsSync(privateDocsDir)) fs.mkdirSync(privateDocsDir);
 }
 
 const multerStorage = multer.memoryStorage();
@@ -67,22 +72,37 @@ const uploadImage = multer({
     },
 });
 
-async function uploadFile(file: Express.Multer.File): Promise<string> {
+// Upload public user avatars (photos)
+async function uploadAvatar(file: Express.Multer.File): Promise<string> {
     if (process.env.BLOB_READ_WRITE_TOKEN) {
-        const blob = await put(`uploads/${Date.now()}-${file.originalname}`, file.buffer, { access: 'public' });
+        const blob = await put(`avatars/${Date.now()}-${file.originalname}`, file.buffer, { access: 'public' });
         return blob.url;
     } else {
         if (process.env.VERCEL) {
             throw new Error("Local file uploads are not supported on Vercel. Please configure BLOB_READ_WRITE_TOKEN.");
         }
-        const filename = `${file.fieldname}-${Date.now()}${path.extname(file.originalname)}`;
-        const filePath = path.join(uploadDir, filename);
-        if (!fs.existsSync(uploadDir)) {
-            fs.mkdirSync(uploadDir);
-        }
+        const filename = `avatar-${Date.now()}${path.extname(file.originalname)}`;
+        const filePath = path.join(avatarsDir, filename);
         fs.writeFileSync(filePath, file.buffer);
-        return `/uploads/${filename}`;
+        return `/uploads/avatars/${filename}`;
     }
+}
+
+// Donor ID document handling for portfolio demo deployment
+// Actual government ID document uploads and storage are completely disabled.
+// Neither public Vercel Blob nor local storage is used for sensitive donor documents.
+async function uploadPrivateDocument(_file?: Express.Multer.File): Promise<string | null> {
+    return null;
+}
+
+export function sanitizeUser(user: any) {
+    if (!user) return user;
+    return {
+        ...user,
+        // Never expose raw storage paths or external blob URLs.
+        // Return authenticated proxy endpoint only when an ID document exists.
+        idDocumentUrl: user.idDocumentUrl ? `/api/hospital/users/${user.id}/document` : null,
+    };
 }
 
 export async function setupAuth(app: Express) {
@@ -94,24 +114,28 @@ export async function setupAuth(app: Express) {
 
     const pgStore = connectPg(session);
 
-    // Ensure password_resets table exists in the database
-    await pool.query(`
-        CREATE TABLE IF NOT EXISTS password_resets (
-            id varchar PRIMARY KEY DEFAULT gen_random_uuid(),
-            user_id varchar NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-            token varchar NOT NULL UNIQUE,
-            expires_at timestamp NOT NULL,
-            used_at timestamp,
-            created_at timestamp DEFAULT now()
-        );
-    `);
+    // Ensure password_resets table exists in the database (skip in memory test mode)
+    if (process.env.USE_MEMORY_SESSION !== "true") {
+        await pool.query(`
+            CREATE TABLE IF NOT EXISTS password_resets (
+                id varchar PRIMARY KEY DEFAULT gen_random_uuid(),
+                user_id varchar NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                token varchar NOT NULL UNIQUE,
+                expires_at timestamp NOT NULL,
+                used_at timestamp,
+                created_at timestamp DEFAULT now()
+            );
+        `);
+    }
 
-    const sessionStore = new pgStore({
-        conString: process.env.DATABASE_URL,
-        createTableIfMissing: true,
-        ttl: sessionTtl,
-        tableName: "sessions",
-    });
+    const sessionStore = process.env.USE_MEMORY_SESSION === "true"
+        ? new session.MemoryStore()
+        : new pgStore({
+            conString: process.env.DATABASE_URL,
+            createTableIfMissing: true,
+            ttl: sessionTtl,
+            tableName: "sessions",
+        });
 
     app.use(
         session({
@@ -156,6 +180,40 @@ export async function setupAuth(app: Express) {
 
     app.post("/api/register", upload.single("idDocument"), async (req, res, next) => {
         try {
+            const requestedRole = req.body.role;
+
+            // Security Check: Hospital Role Registration
+            if (requestedRole === "hospital") {
+                const hospitalCount = await storage.getHospitalCount();
+
+                // If a hospital admin already exists, public hospital registration is permanently locked
+                if (hospitalCount > 0) {
+                    return res.status(403).json({
+                        message: "Public hospital registration is disabled. Additional hospital administrators can only be created by an authorized administrator."
+                    });
+                }
+
+                // If zero hospitals exist, enforce initial bootstrap token
+                const configuredSetupToken = process.env.ADMIN_SETUP_TOKEN?.trim();
+                if (!configuredSetupToken) {
+                    return res.status(403).json({
+                        message: "Initial hospital setup requires ADMIN_SETUP_TOKEN to be configured in environment variables."
+                    });
+                }
+
+                const providedToken = typeof req.body.adminSetupToken === "string" ? req.body.adminSetupToken.trim() : "";
+                const isTokenValid =
+                    providedToken.length > 0 &&
+                    providedToken.length === configuredSetupToken.length &&
+                    crypto.timingSafeEqual(Buffer.from(providedToken), Buffer.from(configuredSetupToken));
+
+                if (!isTokenValid) {
+                    return res.status(403).json({
+                        message: "Invalid admin setup token."
+                    });
+                }
+            }
+
             let bloodGroup = req.body.bloodGroup;
             if (typeof bloodGroup === 'string') {
                 bloodGroup = bloodGroup.trim();
@@ -164,10 +222,16 @@ export async function setupAuth(app: Express) {
                 bloodGroup = null;
             }
 
+            // Demo Mode: Actual donor ID document uploads and storage are completely disabled.
+            // Zero fallback to public Vercel Blob or local document storage.
+            const idDocumentUrl: string | null = null;
+
+            const { adminSetupToken: _token, ...cleanBody } = req.body;
             const data = {
-                ...req.body,
+                ...cleanBody,
+                role: requestedRole === "hospital" ? "hospital" : "user",
                 bloodGroup,
-                idDocumentUrl: req.file ? await uploadFile(req.file) : null,
+                idDocumentUrl,
             };
 
             const result = insertUserSchema.safeParse(data);
@@ -185,18 +249,46 @@ export async function setupAuth(app: Express) {
 
             const userData = {
                 ...result.data,
+                role: requestedRole === "hospital" ? "hospital" : "user",
                 password: hashedPassword,
-                isVerified: false,
-                age: 18, // Default age or remove if not needed
+                isVerified: requestedRole === "hospital", // First-admin hospital is verified by default
+                age: result.data.age || 18,
             };
-            const user = await storage.createUser(userData);
+            let user: User;
+            try {
+                if (requestedRole === "hospital") {
+                    user = await storage.createFirstHospitalAdmin(userData);
+                } else {
+                    user = await storage.createUser(userData);
+                }
+            } catch (createErr: any) {
+                if (createErr?.message && createErr.message.includes("HOSPITAL_EXISTS")) {
+                    return res.status(403).json({
+                        message: "Public hospital registration is disabled. Additional hospital administrators can only be created by an authorized administrator."
+                    });
+                }
+                throw createErr;
+            }
 
             req.login(user, (err) => {
                 if (err) return next(err);
-                res.status(201).json(user);
+                res.status(201).json(sanitizeUser(user));
             });
         } catch (err) {
             next(err);
+        }
+    });
+
+    // Hospital setup status endpoint (public check for registration UI)
+    app.get("/api/auth/hospital-status", async (_req, res) => {
+        try {
+            const count = await storage.getHospitalCount();
+            res.json({
+                hospitalCount: count,
+                registrationOpen: count === 0,
+            });
+        } catch {
+            res.status(500).json({ message: "Failed to check hospital status" });
         }
     });
 
@@ -208,18 +300,18 @@ export async function setupAuth(app: Express) {
             }
 
             const userId = (req.user as any).id;
-            const profileImageUrl = await uploadFile(req.file);
+            const profileImageUrl = await uploadAvatar(req.file);
 
             const user = await storage.updateUser(userId, { profileImageUrl });
-            res.json(user);
+            res.json(sanitizeUser(user));
         } catch (error) {
             console.error("Error uploading avatar:", error);
             res.status(500).send("Failed to upload avatar");
         }
     });
 
-    // Serve static files from uploads directory
-    app.use("/uploads", express.static("uploads"));
+    // Serve public avatars only. Private ID documents are never served statically.
+    app.use("/uploads/avatars", express.static(avatarsDir));
 
     app.post("/api/login", (req, res, next) => {
         passport.authenticate("local", (err: any, user: any, info: any) => {
@@ -227,7 +319,7 @@ export async function setupAuth(app: Express) {
             if (!user) return res.status(401).send("Invalid username or password");
             req.login(user, (err) => {
                 if (err) return next(err);
-                res.status(200).json(user);
+                res.status(200).json(sanitizeUser(user));
             });
         })(req, res, next);
     });
@@ -245,7 +337,7 @@ export async function setupAuth(app: Express) {
 
     app.get("/api/auth/user", (req, res) => {
         if (!req.isAuthenticated()) return res.sendStatus(401);
-        res.json(req.user);
+        res.json(sanitizeUser(req.user));
     });
 
     // ─── Forgot Password ────────────────────────────────────────────────────────
