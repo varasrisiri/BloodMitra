@@ -1,0 +1,328 @@
+AI-READY, POINT-BY-POINT SYSTEM SPECIFICATION
+Smart Blood Donation Platform (Web)
+1. PROJECT OVERVIEW
+
+Build a responsive web application that digitizes blood donation management by connecting individual users and hospitals through a single unified system.
+
+The system must:
+
+Use one common user account for both donors and receivers
+
+Allow dynamic role switching based on user status
+
+Provide real-time matching between blood requests and donors
+
+Centralize hospital-level control and visibility
+
+Store all data in a persistent database
+
+2. USER ROLES & ACCESS CONTROL
+2.1 Common User (Donor / Receiver)
+
+A single registered user can act as:
+
+Donor
+
+Receiver
+
+Or both (at different times)
+
+Role is NOT fixed at registration.
+
+Behavior is controlled using:
+
+canDonate (boolean)
+
+availabilityStatus (boolean)
+
+activeRequest (object / null)
+
+2.2 Hospital (Admin User)
+
+Hospitals act as system supervisors.
+
+Hospital users have permission to:
+
+View all donors & receivers
+
+Manage blood inventory
+
+Create donor/receiver records
+
+Monitor and validate donation flows
+
+Handle emergency requests
+
+3. AUTHENTICATION & REGISTRATION
+3.1 Registration (Single Form for All Users)
+
+Fields
+
+Full Name
+
+Age
+
+Blood Group
+
+Phone Number
+
+Location (City / Area)
+
+Optional: Email
+
+Role Capability (checkbox)
+
+“I am eligible to donate blood”
+
+On submit:
+
+Create a user record
+
+Default availabilityStatus = false
+
+donationCount = 0
+
+3.2 Login
+
+Phone / Email based login
+
+Redirect user based on role:
+
+Hospital → Hospital Dashboard
+
+Normal user → User Dashboard
+
+4. DATABASE DESIGN (CRITICAL)
+4.1 Users Collection
+{
+  "id": "string",
+  "name": "string",
+  "age": number,
+  "bloodGroup": "A+ | A- | B+ | B- | O+ | O- | AB+ | AB-",
+  "phone": "string",
+  "location": "string",
+  "canDonate": boolean,
+  "availabilityStatus": boolean,
+  "donationCount": number,
+  "lastDonationDate": "timestamp | null",
+  "createdByHospital": boolean,
+  "role": "user | hospital"
+}
+
+4.2 Blood Requests Collection
+{
+  "requestId": "string",
+  "requestedBy": "userId | hospitalId",
+  "bloodGroup": "string",
+  "location": "string",
+  "status": "pending | accepted | completed | cancelled",
+  "matchedDonorId": "userId | null",
+  "priority": "normal | emergency",
+  "timestamp": "timestamp"
+}
+
+4.3 Hospital Blood Stock
+{
+  "hospitalId": "string",
+  "bloodGroup": "string",
+  "unitsAvailable": number,
+  "lastUpdated": "timestamp"
+}
+
+5. HOME PAGE REQUIREMENTS
+5.1 Design
+
+Minimal UI
+
+Medical color palette (white, red, blue)
+
+Fully responsive
+
+Fast load time
+
+5.2 Sections
+
+Hero section with CTA
+
+How it works (3 steps)
+
+Live stats (dynamic counters)
+
+Footer with emergency info
+
+6. COMMON USER DASHBOARD
+6.1 Profile Panel
+
+Display user details
+
+Toggle: Available to Donate
+
+Toggle directly updates database
+
+6.2 Donor Search & Filter
+
+Filters:
+
+Blood Group
+
+Location
+
+Availability Status
+
+Results:
+
+Real-time updated list
+
+Only show donors with availabilityStatus = true
+
+6.3 Blood Request Panel
+
+User can:
+
+Create new request
+
+View request status
+
+Cancel request
+
+Accept incoming donor response
+
+6.4 Incoming / Outgoing Requests
+
+For Donors:
+
+See incoming blood requests
+
+Accept or reject requests
+
+For Receivers:
+
+Track status
+
+See matched donor
+
+6.5 Donation History
+
+Total donation count
+
+Last donation date
+
+Status badges (optional gamification)
+
+7. HOSPITAL DASHBOARD (ADMIN PANEL)
+7.1 User Management
+
+View all users
+
+Search by blood group / location
+
+See availability status
+
+See donation history
+
+7.2 Create User (Manual Entry)
+
+Hospital can create:
+
+Donor
+
+Receiver
+
+Emergency walk-in cases
+
+Fields similar to normal registration.
+
+7.3 Blood Inventory Management
+
+Add / remove blood units
+
+Highlight low stock
+
+Auto update timestamps
+
+7.4 Emergency Request Management
+
+Create high priority requests
+
+Auto match donors
+
+Notify matching donors instantly
+
+8. REQUEST MATCHING LOGIC
+8.1 Matching Criteria
+
+Same blood group
+
+Same or nearby location
+
+Donor availability ON
+
+8.2 Flow
+
+Request created
+
+System finds matching donors
+
+Donors receive notification
+
+Donor accepts
+
+Hospital confirms
+
+Donation marked completed
+
+Donation count incremented
+
+9. REAL-TIME FEATURES
+
+Live donor availability
+
+Request status updates
+
+Hospital dashboard auto refresh
+
+(Use Firebase real-time listeners or equivalent)
+
+10. RESPONSIVE UI REQUIREMENTS
+
+Mobile-first
+
+Dashboard collapses into cards on small screens
+
+Touch-friendly buttons
+
+11. SECURITY & VALIDATION
+
+Prevent double accepting
+
+Prevent donating too frequently (cooldown logic optional)
+
+Validate blood group compatibility
+
+Role-based access control
+
+12. TECH STACK EXPECTATION (AI TOOL INPUT)
+
+Frontend: HTML, CSS, JavaScript (ES6)
+
+Backend: Firebase / Supabase / JSON DB
+
+Auth: Firebase Auth (optional)
+
+Database: NoSQL
+
+Hosting: Netlify / Vercel / Firebase Hosting
+
+13. OUTPUT EXPECTATION FOR AI BUILDER
+
+AI should generate:
+
+Clean folder structure
+
+Modular JS
+
+Separate dashboards
+
+Reusable components
+
+Scalable schema

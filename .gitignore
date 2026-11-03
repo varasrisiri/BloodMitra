@@ -1,0 +1,23 @@
+# Dependencies
+node_modules/
+
+# Production build output
+dist/
+server/public/
+
+# Environment files
+.env
+.env.*
+!.env.example
+
+# Local uploads & cache
+uploads/
+/uploads/
+.local/
+
+# Logs & temporary files
+*.log
+*.tar.gz
+vite.config.ts.*
+.DS_Store
+Thumbs.db
