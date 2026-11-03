@@ -1,32 +1,13 @@
 {
-    "version": 2,
-    "builds": [
-        {
-            "src": "package.json",
-            "use": "@vercel/static-build",
-            "config": {
-                "distDir": "dist/public"
-            }
-        },
-        {
-            "src": "api/index.ts",
-            "use": "@vercel/node",
-            "config": {
-                "includeFiles": [
-                    "server/**",
-                    "shared/**"
-                ]
-            }
-        }
-    ],
-    "rewrites": [
-        {
-            "source": "/api/(.*)",
-            "destination": "/api/index.ts"
-        },
-        {
-            "source": "/(.*)",
-            "destination": "/index.html"
-        }
-    ]
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "rewrites": [
+    {
+      "source": "/api(.*)",
+      "destination": "/api/index.ts"
+    },
+    {
+      "source": "/(.*)",
+      "destination": "/index.html"
+    }
+  ]
 }
