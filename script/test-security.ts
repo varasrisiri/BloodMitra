@@ -46,9 +46,60 @@ async function runSecurityTestSuite() {
     const origCreateUserByHospital = storage.createUserByHospital;
     const origGetAllUsers = storage.getAllUsers;
     const origGetDonors = storage.getDonors;
+    const origSaveDonorDocument = storage.saveDonorDocument;
+    const origGetDonorDocument = storage.getDonorDocument;
+    const origDeleteDonorDocument = storage.deleteDonorDocument;
+    const origUpdateUser = storage.updateUser;
+    const origVerifyUser = storage.verifyUser;
+    const origDeleteUser = storage.deleteUser;
 
     const mockUsers = new Map<string, User>();
+    const mockDocs = new Map<string, { id: string; userId: string; fileName: string; mimeType: string; fileData: Buffer; fileSize: number; uploadedAt: Date | null }>();
     let mockHospitalCount = 1;
+
+    storage.saveDonorDocument = async (doc) => {
+        mockDocs.set(doc.userId, {
+            id: `doc-${Date.now()}`,
+            userId: doc.userId,
+            fileName: doc.fileName,
+            mimeType: doc.mimeType,
+            fileData: doc.fileData,
+            fileSize: doc.fileSize,
+            uploadedAt: new Date(),
+        });
+    };
+
+    storage.getDonorDocument = async (userId: string) => {
+        return mockDocs.get(userId);
+    };
+
+    storage.deleteDonorDocument = async (userId: string) => {
+        mockDocs.delete(userId);
+    };
+
+    storage.updateUser = async (id, data) => {
+        const u = mockUsers.get(id);
+        if (!u) return undefined;
+        const updated = { ...u, ...data };
+        mockUsers.set(id, updated);
+        return updated;
+    };
+
+    storage.verifyUser = async (id) => {
+        const u = mockUsers.get(id);
+        if (!u) return undefined;
+        const updated = { ...u, isVerified: true };
+        mockUsers.set(id, updated);
+        return updated;
+    };
+
+    storage.deleteUser = async (id) => {
+        const u = mockUsers.get(id);
+        if (!u) return undefined;
+        mockUsers.delete(id);
+        mockDocs.delete(id);
+        return u;
+    };
 
     try {
         // --- 1. Unit & Data Protection Tests ---
@@ -176,6 +227,12 @@ async function runSecurityTestSuite() {
 
         const server = createServer(app);
         await registerRoutes(server, app);
+
+        app.use((err: any, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
+            const status = err.status || err.statusCode || (err.name === "MulterError" ? 400 : 500);
+            const message = err.message || "Internal Server Error";
+            res.status(status).json({ message });
+        });
 
         await new Promise<void>((resolve) => {
             server.listen(0, "127.0.0.1", () => resolve());
@@ -430,15 +487,16 @@ async function runSecurityTestSuite() {
                 `Observed statuses: [${statuses.join(", ")}]`
             );
 
-            // --- Test Normal Donor Registration (Demo Mode: ID document optional) ---
-            console.log("\n11. Testing Normal Donor Registration & Constraints (Demo Mode)...");
+            // --- Test Donor Registration with PDF ID Document Validation ---
+            console.log("\n11. Testing Donor Registration with PDF ID Document Validation...");
 
+            // Test 1: Missing ID document
             const donorNoDocForm = new FormData();
-            donorNoDocForm.append("username", "newdonor_demo");
+            donorNoDocForm.append("username", "donor_no_doc");
             donorNoDocForm.append("password", "Password123!");
             donorNoDocForm.append("role", "user");
-            donorNoDocForm.append("name", "New Demo Donor");
-            donorNoDocForm.append("email", "newdonor_demo@example.com");
+            donorNoDocForm.append("name", "No Doc Donor");
+            donorNoDocForm.append("email", "nodoc@example.com");
             donorNoDocForm.append("phone", "9876543210");
             donorNoDocForm.append("location", "Delhi");
             donorNoDocForm.append("bloodGroup", "A+");
@@ -447,38 +505,173 @@ async function runSecurityTestSuite() {
                 method: "POST",
                 body: donorNoDocForm,
             });
-            const donorNoDocBody = donorNoDocResp.ok ? await donorNoDocResp.json() : null;
             recordTest(
-                "Normal donor registration without ID document succeeds in demo mode (201, role: 'user')",
-                donorNoDocResp.status === 201 && donorNoDocBody?.role === "user",
-                `Status: ${donorNoDocResp.status}, Role: ${donorNoDocBody?.role}`
+                "Donor registration without required ID document is rejected (400)",
+                donorNoDocResp.status === 400,
+                `Status: ${donorNoDocResp.status}`
             );
 
-            const pdfBlob = new Blob(["%PDF-1.4 Mock Donor Proof"], { type: "application/pdf" });
-            const donorWithDocForm = new FormData();
-            donorWithDocForm.append("username", "validnewdonor");
-            donorWithDocForm.append("password", "Password123!");
-            donorWithDocForm.append("role", "user");
-            donorWithDocForm.append("name", "Valid New Donor");
-            donorWithDocForm.append("email", "validnew@example.com");
-            donorWithDocForm.append("phone", "9876543210");
-            donorWithDocForm.append("location", "Delhi");
-            donorWithDocForm.append("bloodGroup", "B+");
-            donorWithDocForm.append("idDocument", pdfBlob, "proof.pdf");
+            // Test 2: Non-PDF file upload
+            const textBlob = new Blob(["This is a text document, not a PDF"], { type: "text/plain" });
+            const donorTextDocForm = new FormData();
+            donorTextDocForm.append("username", "donor_text_doc");
+            donorTextDocForm.append("password", "Password123!");
+            donorTextDocForm.append("role", "user");
+            donorTextDocForm.append("name", "Text Doc Donor");
+            donorTextDocForm.append("email", "textdoc@example.com");
+            donorTextDocForm.append("phone", "9876543210");
+            donorTextDocForm.append("location", "Delhi");
+            donorTextDocForm.append("bloodGroup", "A+");
+            donorTextDocForm.append("idDocument", textBlob, "not_a_pdf.txt");
 
-            const donorSuccessResp = await fetch(`${baseUrl}/api/register`, {
+            const donorTextDocResp = await fetch(`${baseUrl}/api/register`, {
                 method: "POST",
-                body: donorWithDocForm,
+                body: donorTextDocForm,
             });
-            const donorSuccessBody = donorSuccessResp.ok ? await donorSuccessResp.json() : null;
             recordTest(
-                "Normal donor registration succeeds in demo mode with idDocumentUrl set to null (zero fallback to public storage)",
-                donorSuccessResp.status === 201 && donorSuccessBody?.role === "user" && donorSuccessBody?.idDocumentUrl === null,
-                `Status: ${donorSuccessResp.status}, Role: ${donorSuccessBody?.role}, DocUrl: ${donorSuccessBody?.idDocumentUrl}`
+                "Donor registration with non-PDF file is rejected (400)",
+                donorTextDocResp.status === 400,
+                `Status: ${donorTextDocResp.status}`
+            );
+
+            // Test 3: Invalid PDF magic bytes (fake .pdf extension)
+            const fakePdfBlob = new Blob(["NOT_A_REAL_PDF_HEADER"], { type: "application/pdf" });
+            const donorFakePdfForm = new FormData();
+            donorFakePdfForm.append("username", "donor_fake_pdf");
+            donorFakePdfForm.append("password", "Password123!");
+            donorFakePdfForm.append("role", "user");
+            donorFakePdfForm.append("name", "Fake PDF Donor");
+            donorFakePdfForm.append("email", "fakepdf@example.com");
+            donorFakePdfForm.append("phone", "9876543210");
+            donorFakePdfForm.append("location", "Delhi");
+            donorFakePdfForm.append("bloodGroup", "A+");
+            donorFakePdfForm.append("idDocument", fakePdfBlob, "fake.pdf");
+
+            const donorFakePdfResp = await fetch(`${baseUrl}/api/register`, {
+                method: "POST",
+                body: donorFakePdfForm,
+            });
+            recordTest(
+                "Donor registration with invalid PDF header magic bytes is rejected (400)",
+                donorFakePdfResp.status === 400,
+                `Status: ${donorFakePdfResp.status}`
+            );
+
+            // Test 4: Valid PDF upload and PostgreSQL BYTEA storage
+            const validPdfPayload = "%PDF-1.4 Genuine Government ID Proof Payload";
+            const validPdfBlob = new Blob([validPdfPayload], { type: "application/pdf" });
+            const donorValidForm = new FormData();
+            donorValidForm.append("username", "valid_donor_bytea");
+            donorValidForm.append("password", "Password123!");
+            donorValidForm.append("role", "user");
+            donorValidForm.append("name", "Valid Bytea Donor");
+            donorValidForm.append("email", "valid_bytea@example.com");
+            donorValidForm.append("phone", "9876543210");
+            donorValidForm.append("location", "Delhi");
+            donorValidForm.append("bloodGroup", "B+");
+            donorValidForm.append("idDocument", validPdfBlob, "government_id.pdf");
+
+            const donorValidResp = await fetch(`${baseUrl}/api/register`, {
+                method: "POST",
+                body: donorValidForm,
+            });
+            const donorValidBody = donorValidResp.ok ? await donorValidResp.json() : null;
+            const validUserId = donorValidBody?.id;
+
+            recordTest(
+                "Donor registration with valid PDF succeeds (201, role: 'user', sanitized doc proxy)",
+                donorValidResp.status === 201 &&
+                donorValidBody?.role === "user" &&
+                donorValidBody?.idDocumentUrl === `/api/hospital/users/${validUserId}/document`,
+                `Status: ${donorValidResp.status}, DocUrl: ${donorValidBody?.idDocumentUrl}`
+            );
+
+            // Test 5: Hospital Admin streams genuine BYTEA document from database
+            const hospByteaDocResp = await fetch(`${baseUrl}/api/hospital/users/${validUserId}/document`, {
+                headers: { Cookie: hospCookie },
+            });
+            const byteaDocText = await hospByteaDocResp.text();
+            const byteaContentType = hospByteaDocResp.headers.get("content-type");
+            recordTest(
+                "Hospital admin streams stored PostgreSQL BYTEA document with PDF content (200)",
+                hospByteaDocResp.status === 200 &&
+                (byteaContentType?.includes("pdf") ?? false) &&
+                byteaDocText.startsWith("%PDF"),
+                `Status: ${hospByteaDocResp.status}, Content-Type: ${byteaContentType}, StartsWith: ${byteaDocText.slice(0, 8)}`
+            );
+
+            // --- Test Hospital Verification Approval and Rejection Workflow ---
+            console.log("\n12. Testing Hospital Verification Approval & Rejection Workflow...");
+
+            // Verification Approval: Hospital admin verifies donor
+            const verifyResp = await fetch(`${baseUrl}/api/hospital/users/${validUserId}/verify`, {
+                method: "PATCH",
+                headers: { Cookie: hospCookie },
+            });
+            const verifyBody = verifyResp.ok ? await verifyResp.json() : null;
+            recordTest(
+                "Hospital administrator approves donor verification (PATCH /api/hospital/users/:id/verify -> 200, isVerified: true)",
+                verifyResp.status === 200 && verifyBody?.isVerified === true,
+                `Status: ${verifyResp.status}, isVerified: ${verifyBody?.isVerified}`
+            );
+
+            // Non-hospital user cannot verify donors
+            const donorUnauthorizedVerify = await fetch(`${baseUrl}/api/hospital/users/${validUserId}/verify`, {
+                method: "PATCH",
+                headers: { Cookie: donorCookie },
+            });
+            recordTest(
+                "Individual donor is rejected from verifying accounts (403)",
+                donorUnauthorizedVerify.status === 403,
+                `Status: ${donorUnauthorizedVerify.status}`
+            );
+
+            // Verified user cannot be deleted by hospital
+            const deleteVerifiedResp = await fetch(`${baseUrl}/api/hospital/users/${validUserId}`, {
+                method: "DELETE",
+                headers: { Cookie: hospCookie },
+            });
+            recordTest(
+                "Hospital administrator cannot delete an already-verified user (400)",
+                deleteVerifiedResp.status === 400,
+                `Status: ${deleteVerifiedResp.status}`
+            );
+
+            // Create an unverified user to test rejection/deletion workflow
+            const unverifiedDonor: User = {
+                ...sensitiveUser,
+                id: "unverified-donor-to-reject",
+                username: "unverified_reject",
+                role: "user",
+                isVerified: false,
+                idDocumentUrl: "db://donor_documents/unverified-donor-to-reject",
+            };
+            mockUsers.set(unverifiedDonor.id, unverifiedDonor);
+
+            // Hospital admin rejects/deletes unverified user
+            const rejectUnverifiedResp = await fetch(`${baseUrl}/api/hospital/users/${unverifiedDonor.id}`, {
+                method: "DELETE",
+                headers: { Cookie: hospCookie },
+            });
+            recordTest(
+                "Hospital administrator successfully rejects/deletes an unverified user (DELETE /api/hospital/users/:id -> 200)",
+                rejectUnverifiedResp.status === 200,
+                `Status: ${rejectUnverifiedResp.status}`
+            );
+
+            // Non-hospital user cannot delete accounts
+            const donorUnauthorizedDelete = await fetch(`${baseUrl}/api/hospital/users/some-user-id`, {
+                method: "DELETE",
+                headers: { Cookie: donorCookie },
+            });
+            recordTest(
+                "Individual donor is rejected from deleting accounts (403)",
+                donorUnauthorizedDelete.status === 403,
+                `Status: ${donorUnauthorizedDelete.status}`
             );
 
             // --- Test Login & Authentication ---
-            console.log("\n12. Testing Login & Authentication...");
+            console.log("\n13. Testing Login & Authentication...");
 
             const testLoginPass = "ValidPass123!";
             const hashedTestPass = await hashPassword(testLoginPass);
@@ -524,7 +717,7 @@ async function runSecurityTestSuite() {
             );
 
             // --- Test Donor List Privacy ---
-            console.log("\n13. Testing Donor List Privacy & Access Control...");
+            console.log("\n14. Testing Donor List Privacy & Access Control...");
 
             const unauthDonorsResp = await fetch(`${baseUrl}/api/donors`);
             recordTest(
@@ -560,6 +753,12 @@ async function runSecurityTestSuite() {
         storage.createUserByHospital = origCreateUserByHospital;
         storage.getAllUsers = origGetAllUsers;
         storage.getDonors = origGetDonors;
+        storage.saveDonorDocument = origSaveDonorDocument;
+        storage.getDonorDocument = origGetDonorDocument;
+        storage.deleteDonorDocument = origDeleteDonorDocument;
+        storage.updateUser = origUpdateUser;
+        storage.verifyUser = origVerifyUser;
+        storage.deleteUser = origDeleteUser;
         await pool.end().catch(() => {});
     }
 

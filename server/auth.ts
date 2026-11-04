@@ -35,7 +35,9 @@ const upload = multer({
         if (file.mimetype === "application/pdf") {
             cb(null, true);
         } else {
-            cb(new Error("Only PDF files are allowed"));
+            const err: any = new Error("Only PDF files are allowed");
+            err.status = 400;
+            cb(err);
         }
     },
     limits: {
@@ -88,11 +90,16 @@ async function uploadAvatar(file: Express.Multer.File): Promise<string> {
     }
 }
 
-// Donor ID document handling for portfolio demo deployment
-// Actual government ID document uploads and storage are completely disabled.
-// Neither public Vercel Blob nor local storage is used for sensitive donor documents.
-async function uploadPrivateDocument(_file?: Express.Multer.File): Promise<string | null> {
-    return null;
+// Upload private donor ID document to PostgreSQL (BYTEA storage)
+async function uploadPrivateDocument(userId: string, file: Express.Multer.File): Promise<string> {
+    await storage.saveDonorDocument({
+        userId,
+        fileName: file.originalname,
+        mimeType: file.mimetype || "application/pdf",
+        fileData: file.buffer,
+        fileSize: file.size,
+    });
+    return `db://donor_documents/${userId}`;
 }
 
 export function sanitizeUser(user: any) {
@@ -113,20 +120,6 @@ export async function setupAuth(app: Express) {
     }
 
     const pgStore = connectPg(session);
-
-    // Ensure password_resets table exists in the database (skip in memory test mode)
-    if (process.env.USE_MEMORY_SESSION !== "true") {
-        await pool.query(`
-            CREATE TABLE IF NOT EXISTS password_resets (
-                id varchar PRIMARY KEY DEFAULT gen_random_uuid(),
-                user_id varchar NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-                token varchar NOT NULL UNIQUE,
-                expires_at timestamp NOT NULL,
-                used_at timestamp,
-                created_at timestamp DEFAULT now()
-            );
-        `);
-    }
 
     const sessionStore = process.env.USE_MEMORY_SESSION === "true"
         ? new session.MemoryStore()
@@ -193,24 +186,36 @@ export async function setupAuth(app: Express) {
                     });
                 }
 
-                // If zero hospitals exist, enforce initial bootstrap token
+                // If zero hospitals exist, initial hospital setup is CLI bootstrap only (or via valid admin setup token)
                 const configuredSetupToken = process.env.ADMIN_SETUP_TOKEN?.trim();
-                if (!configuredSetupToken) {
-                    return res.status(403).json({
-                        message: "Initial hospital setup requires ADMIN_SETUP_TOKEN to be configured in environment variables."
-                    });
-                }
-
                 const providedToken = typeof req.body.adminSetupToken === "string" ? req.body.adminSetupToken.trim() : "";
                 const isTokenValid =
+                    Boolean(configuredSetupToken) &&
                     providedToken.length > 0 &&
-                    providedToken.length === configuredSetupToken.length &&
-                    crypto.timingSafeEqual(Buffer.from(providedToken), Buffer.from(configuredSetupToken));
+                    providedToken.length === configuredSetupToken!.length &&
+                    crypto.timingSafeEqual(Buffer.from(providedToken), Buffer.from(configuredSetupToken!));
 
                 if (!isTokenValid) {
                     return res.status(403).json({
-                        message: "Invalid admin setup token."
+                        message: "Public hospital registration is disabled. The initial hospital administrator must be created using the secure CLI bootstrap tool (npm run create:admin)."
                     });
+                }
+            }
+
+            // ID Document PDF Validation for Individual Registration
+            if (requestedRole !== "hospital") {
+                if (!req.file) {
+                    return res.status(400).json({ message: "ID Document (PDF, maximum 2MB) is required for donor registration." });
+                }
+                if (req.file.size > 2 * 1024 * 1024) {
+                    return res.status(400).json({ message: "ID Document must be less than 2MB in size." });
+                }
+                const ext = path.extname(req.file.originalname).toLowerCase();
+                if (ext !== ".pdf" || req.file.mimetype !== "application/pdf") {
+                    return res.status(400).json({ message: "Only PDF files are allowed for ID Document." });
+                }
+                if (req.file.buffer.length < 4 || req.file.buffer.subarray(0, 4).toString() !== "%PDF") {
+                    return res.status(400).json({ message: "The uploaded file is not a valid PDF document." });
                 }
             }
 
@@ -222,16 +227,12 @@ export async function setupAuth(app: Express) {
                 bloodGroup = null;
             }
 
-            // Demo Mode: Actual donor ID document uploads and storage are completely disabled.
-            // Zero fallback to public Vercel Blob or local document storage.
-            const idDocumentUrl: string | null = null;
-
             const { adminSetupToken: _token, ...cleanBody } = req.body;
             const data = {
                 ...cleanBody,
                 role: requestedRole === "hospital" ? "hospital" : "user",
                 bloodGroup,
-                idDocumentUrl,
+                idDocumentUrl: req.file ? "db://pending" : null,
             };
 
             const result = insertUserSchema.safeParse(data);
@@ -260,6 +261,11 @@ export async function setupAuth(app: Express) {
                     user = await storage.createFirstHospitalAdmin(userData);
                 } else {
                     user = await storage.createUser(userData);
+                    if (req.file) {
+                        const docUrl = await uploadPrivateDocument(user.id, req.file);
+                        const updated = await storage.updateUser(user.id, { idDocumentUrl: docUrl });
+                        if (updated) user = updated;
+                    }
                 }
             } catch (createErr: any) {
                 if (createErr?.message && createErr.message.includes("HOSPITAL_EXISTS")) {

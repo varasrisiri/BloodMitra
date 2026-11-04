@@ -8,6 +8,7 @@ import {
   boolean,
   integer,
   pgEnum,
+  customType,
 } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
@@ -56,6 +57,7 @@ export const users = pgTable("users", {
   createdByHospital: boolean("created_by_hospital").default(false),
   role: userRoleEnum("role").default("user"),
   isVerified: boolean("is_verified").default(false),
+  verificationStatus: varchar("verification_status").default("pending"),
   idDocumentUrl: varchar("id_document_url"),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
@@ -108,6 +110,26 @@ export const passwordResets = pgTable("password_resets", {
   usedAt: timestamp("used_at"),
   createdAt: timestamp("created_at").defaultNow(),
 });
+
+export const bytea = customType<{ data: Buffer; driverData: Buffer }>({
+  dataType() {
+    return "bytea";
+  },
+});
+
+// Donor private verification documents table
+export const donorDocuments = pgTable("donor_documents", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  userId: varchar("user_id").notNull().references(() => users.id, { onDelete: "cascade" }).unique(),
+  fileName: varchar("file_name").notNull(),
+  mimeType: varchar("mime_type").notNull().default("application/pdf"),
+  fileData: bytea("file_data").notNull(),
+  fileSize: integer("file_size").notNull(),
+  uploadedAt: timestamp("uploaded_at").defaultNow(),
+});
+
+export type DonorDocument = typeof donorDocuments.$inferSelect;
+export type InsertDonorDocument = typeof donorDocuments.$inferInsert;
 
 export type PasswordReset = typeof passwordResets.$inferSelect;
 

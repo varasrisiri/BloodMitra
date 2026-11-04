@@ -53,7 +53,8 @@ import {
   Eye,
   UserCircle,
   Trash2,
-  Megaphone
+  Megaphone,
+  Clock
 } from "lucide-react";
 import type { User, BloodRequest, HospitalBloodStock, BloodGroup } from "@shared/schema";
 
@@ -185,6 +186,19 @@ function UserManagement() {
     },
     onError: (error) => {
       toast({ title: "Error", description: "Failed to verify user.", variant: "destructive" });
+    },
+  });
+
+  const rejectUserMutation = useMutation({
+    mutationFn: async (userId: string) => {
+      await apiRequest("PATCH", `/api/hospital/users/${userId}/reject`, {});
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api", "hospital", "users"] });
+      toast({ title: "Rejected", description: "Donor document verification has been rejected." });
+    },
+    onError: (error) => {
+      toast({ title: "Error", description: "Failed to reject user verification.", variant: "destructive" });
     },
   });
 
@@ -495,9 +509,14 @@ function UserManagement() {
                             <CheckCircle className="h-4 w-4" />
                             <span className="text-xs font-medium">Verified</span>
                           </div>
+                        ) : (user as any).verificationStatus === "rejected" ? (
+                          <div className="flex items-center gap-1 text-red-600">
+                            <XCircle className="h-4 w-4" />
+                            <span className="text-xs font-medium">Rejected</span>
+                          </div>
                         ) : (
                           <div className="flex items-center gap-1 text-amber-600">
-                            <XCircle className="h-4 w-4" />
+                            <Clock className="h-4 w-4" />
                             <span className="text-xs font-medium">Pending</span>
                           </div>
                         )}
@@ -529,9 +548,20 @@ function UserManagement() {
                                 variant="outline"
                                 className="h-8 border-green-200 hover:border-green-300 hover:bg-green-50 text-green-700"
                                 onClick={() => verifyUserMutation.mutate(user.id)}
-                                disabled={verifyUserMutation.isPending}
+                                disabled={verifyUserMutation.isPending || rejectUserMutation.isPending}
                               >
                                 Verify
+                              </Button>
+                            )}
+                            {user.idDocumentUrl && (user as any).verificationStatus !== "rejected" && (
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                className="h-8 border-amber-200 hover:border-amber-300 hover:bg-amber-50 text-amber-700"
+                                onClick={() => rejectUserMutation.mutate(user.id)}
+                                disabled={verifyUserMutation.isPending || rejectUserMutation.isPending}
+                              >
+                                Reject
                               </Button>
                             )}
                             <Button

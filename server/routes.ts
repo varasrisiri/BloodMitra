@@ -319,6 +319,16 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       res.setHeader("X-Content-Type-Options", "nosniff");
       res.setHeader("Cache-Control", "private, no-cache, no-store, must-revalidate");
 
+      // Check PostgreSQL BYTEA storage first
+      const doc = await storage.getDonorDocument(targetUserId);
+      if (doc) {
+        res.setHeader("Content-Type", doc.mimeType || "application/pdf");
+        res.setHeader("Content-Disposition", `inline; filename="${doc.fileName || 'id_document.pdf'}"`);
+        res.setHeader("X-Content-Type-Options", "nosniff");
+        res.setHeader("Cache-Control", "private, no-cache, no-store, must-revalidate");
+        return res.send(doc.fileData);
+      }
+
       if (storedPathOrUrl.startsWith("http://") || storedPathOrUrl.startsWith("https://")) {
         // Stream from cloud storage (e.g. legacy Vercel Blob) through backend proxy
         const blobRes = await fetch(storedPathOrUrl);
@@ -421,6 +431,30 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     } catch (error) {
       console.error("Error verifying user:", error);
       res.status(500).json({ message: "Failed to verify user" });
+    }
+  });
+
+  // Reject donor verification by hospital
+  app.patch("/api/hospital/users/:id/reject", isAuthenticated, async (req: any, res) => {
+    try {
+      const adminId = (req.user as any).id;
+      const adminUser = await storage.getUser(adminId);
+
+      if (adminUser?.role !== "hospital") {
+        return res.status(403).json({ message: "Access denied" });
+      }
+
+      const { id } = req.params;
+      const rejectedUser = await storage.rejectUser(id);
+
+      if (!rejectedUser) {
+        return res.status(404).json({ message: "User not found" });
+      }
+
+      res.json(rejectedUser);
+    } catch (error) {
+      console.error("Error rejecting user verification:", error);
+      res.status(500).json({ message: "Failed to reject user verification" });
     }
   });
 

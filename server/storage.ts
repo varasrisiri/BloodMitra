@@ -12,7 +12,7 @@ import {
   type InsertAnnouncement,
   announcements,
 } from "../shared/schema.js";
-import { db } from "./db.js";
+import { db, pool } from "./db.js";
 import { eq, and, or, desc, sql, getTableColumns } from "drizzle-orm";
 
 export interface IStorage {
@@ -27,10 +27,16 @@ export interface IStorage {
   getDonors(filters?: { bloodGroup?: string; location?: string; available?: boolean }): Promise<User[]>;
   createUserByHospital(data: Partial<UpsertUser>): Promise<User>;
   verifyUser(id: string): Promise<User | undefined>;
+  rejectUser(id: string): Promise<User | undefined>;
   deleteUser(id: string): Promise<User | undefined>;
   updateUserStatus(id: string, data: { canDonate?: boolean; availabilityStatus?: boolean }): Promise<User | undefined>;
   getHospitalCount(): Promise<number>;
   createFirstHospitalAdmin(userData: any): Promise<User>;
+
+  // Donor private document operations
+  saveDonorDocument(doc: { userId: string; fileName: string; mimeType: string; fileData: Buffer; fileSize: number }): Promise<void>;
+  getDonorDocument(userId: string): Promise<{ id: string; userId: string; fileName: string; mimeType: string; fileData: Buffer; fileSize: number; uploadedAt: Date | null } | undefined>;
+  deleteDonorDocument(userId: string): Promise<void>;
 
   // Blood request operations
   createBloodRequest(data: InsertBloodRequest): Promise<BloodRequest>;
@@ -166,7 +172,16 @@ export class DatabaseStorage implements IStorage {
   async verifyUser(id: string): Promise<User | undefined> {
     const [user] = await db
       .update(users)
-      .set({ isVerified: true, updatedAt: new Date() })
+      .set({ isVerified: true, verificationStatus: "verified", updatedAt: new Date() })
+      .where(eq(users.id, id))
+      .returning();
+    return user;
+  }
+
+  async rejectUser(id: string): Promise<User | undefined> {
+    const [user] = await db
+      .update(users)
+      .set({ isVerified: false, verificationStatus: "rejected", updatedAt: new Date() })
       .where(eq(users.id, id))
       .returning();
     return user;
@@ -223,6 +238,45 @@ export class DatabaseStorage implements IStorage {
       .where(eq(users.id, id))
       .returning();
     return user;
+  }
+
+  // Donor private document operations (PostgreSQL BYTEA storage)
+  async saveDonorDocument(doc: { userId: string; fileName: string; mimeType: string; fileData: Buffer; fileSize: number }): Promise<void> {
+    await pool.query(
+      `INSERT INTO donor_documents (user_id, file_name, mime_type, file_data, file_size)
+       VALUES ($1, $2, $3, $4, $5)
+       ON CONFLICT (user_id) DO UPDATE SET
+         file_name = EXCLUDED.file_name,
+         mime_type = EXCLUDED.mime_type,
+         file_data = EXCLUDED.file_data,
+         file_size = EXCLUDED.file_size,
+         uploaded_at = now()`,
+      [doc.userId, doc.fileName, doc.mimeType, doc.fileData, doc.fileSize]
+    );
+  }
+
+  async getDonorDocument(userId: string): Promise<{ id: string; userId: string; fileName: string; mimeType: string; fileData: Buffer; fileSize: number; uploadedAt: Date | null } | undefined> {
+    const res = await pool.query(
+      `SELECT id, user_id, file_name, mime_type, file_data, file_size, uploaded_at
+       FROM donor_documents
+       WHERE user_id = $1`,
+      [userId]
+    );
+    if (res.rows.length === 0) return undefined;
+    const r = res.rows[0];
+    return {
+      id: r.id as string,
+      userId: r.user_id as string,
+      fileName: r.file_name as string,
+      mimeType: r.mime_type as string,
+      fileData: r.file_data as Buffer,
+      fileSize: r.file_size as number,
+      uploadedAt: r.uploaded_at as Date | null,
+    };
+  }
+
+  async deleteDonorDocument(userId: string): Promise<void> {
+    await pool.query(`DELETE FROM donor_documents WHERE user_id = $1`, [userId]);
   }
 
   // Blood request operations

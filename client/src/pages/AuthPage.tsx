@@ -2,7 +2,6 @@ import { useState, useEffect } from "react";
 import { useAuth } from "@/hooks/useAuth";
 import { useToast } from "@/hooks/use-toast";
 import { useLocation } from "wouter";
-import { useQuery } from "@tanstack/react-query";
 import {
     Card,
     CardContent,
@@ -153,17 +152,6 @@ function LoginForm({ role, setRole, loginMutation }: any) {
 
 function RegisterForm({ role, setRole, registerMutation }: any) {
     const { toast } = useToast();
-    const [adminSetupToken, setAdminSetupToken] = useState("");
-
-    const { data: hospitalStatus } = useQuery<{ hospitalCount: number; registrationOpen: boolean }>({
-        queryKey: ["/api/auth/hospital-status"],
-        queryFn: async () => {
-            const res = await fetch("/api/auth/hospital-status");
-            if (!res.ok) throw new Error("Failed to check hospital registration status");
-            return res.json();
-        },
-    });
-
     const form = useForm<z.input<typeof insertUserSchema>>({
         resolver: zodResolver(insertUserSchema),
         defaultValues: {
@@ -184,25 +172,6 @@ function RegisterForm({ role, setRole, registerMutation }: any) {
     }, [role, form]);
 
     const onSubmit = (data: z.input<typeof insertUserSchema>) => {
-        if (role === "hospital") {
-            if (hospitalStatus && !hospitalStatus.registrationOpen) {
-                toast({
-                    title: "Registration Disabled",
-                    description: "Public hospital registration is disabled. Please contact your system administrator.",
-                    variant: "destructive",
-                });
-                return;
-            }
-            if (!adminSetupToken.trim()) {
-                toast({
-                    title: "Setup Token Required",
-                    description: "Please enter the admin setup token to initialize the hospital account.",
-                    variant: "destructive",
-                });
-                return;
-            }
-        }
-
         const formData = new FormData();
 
         // IMPORTANT: Append text fields BEFORE files. 
@@ -217,8 +186,24 @@ function RegisterForm({ role, setRole, registerMutation }: any) {
         formData.delete("role");
         formData.append("role", role);
 
-        if (role === "hospital") {
-            formData.append("adminSetupToken", adminSetupToken.trim());
+        const fileInput = document.getElementById("id-document") as HTMLInputElement;
+        if (fileInput?.files?.[0]) {
+            if (fileInput.files[0].size > 2 * 1024 * 1024) {
+                toast({
+                    title: "File too large",
+                    description: "ID Document must be less than 2MB",
+                    variant: "destructive",
+                });
+                return;
+            }
+            formData.append("idDocument", fileInput.files[0]);
+        } else if (role === "user") {
+            toast({
+                title: "ID Required",
+                description: "Please upload a valid ID proof (PDF)",
+                variant: "destructive",
+            });
+            return;
         }
 
         registerMutation.mutate(formData);
@@ -244,40 +229,7 @@ function RegisterForm({ role, setRole, registerMutation }: any) {
             </CardHeader>
             <CardContent className="pt-6 px-0 text-left">
                 <RoleToggle role={role} setRole={setRole} />
-
-                {role === "hospital" && hospitalStatus && !hospitalStatus.registrationOpen && (
-                    <div className="mb-4 p-4 bg-amber-500/10 border border-amber-500/30 rounded-xl text-amber-900 dark:text-amber-200 text-sm space-y-1">
-                        <p className="font-semibold flex items-center gap-1.5">
-                            <Lock className="h-4 w-4" /> Hospital Registration Restricted
-                        </p>
-                        <p className="text-xs opacity-90 leading-relaxed">
-                            The initial hospital administrator has already been registered. Additional hospital staff or hospital accounts can only be provisioned by an authorized administrator.
-                        </p>
-                    </div>
-                )}
-
                 <form onSubmit={form.handleSubmit(onSubmit, onFormError)} className="space-y-4">
-                    {role === "hospital" && hospitalStatus?.registrationOpen && (
-                        <div className="space-y-2">
-                            <Label htmlFor="admin-token">Admin Setup Token *</Label>
-                            <div className="relative">
-                                <Lock className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
-                                <Input
-                                    id="admin-token"
-                                    type="password"
-                                    placeholder="Enter ADMIN_SETUP_TOKEN"
-                                    className="pl-10"
-                                    value={adminSetupToken}
-                                    onChange={(e) => setAdminSetupToken(e.target.value)}
-                                    required
-                                />
-                            </div>
-                            <p className="text-xs text-muted-foreground">
-                                Required for initial bootstrap of the first hospital administrator account.
-                            </p>
-                        </div>
-                    )}
-
                     <div className="space-y-2">
                         <Label htmlFor="name">{role === "hospital" ? "Hospital Name" : "Full Name"}</Label>
                         <Input id="name" placeholder={role === "hospital" ? "ABC Hospital" : "Ex: Mohit Prakash"} {...form.register("name")} required />
@@ -334,24 +286,23 @@ function RegisterForm({ role, setRole, registerMutation }: any) {
                     </div>
 
                     {role === "user" && (
-                        <div className="p-3 bg-muted/60 border border-border/80 rounded-xl text-xs text-muted-foreground flex items-center gap-2.5">
-                            <FileText className="h-4 w-4 text-primary shrink-0" />
-                            <span>
-                                <strong>Portfolio Demo Mode:</strong> Government identity document upload and verification are disabled.
-                            </span>
+                        <div className="space-y-2">
+                            <Label htmlFor="id-document">ID Document (PDF, max 2MB) *</Label>
+                            <div className="relative">
+                                <FileText className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
+                                <Input
+                                    id="id-document"
+                                    type="file"
+                                    accept=".pdf"
+                                    className="pl-10 pb-2 cursor-pointer pt-2"
+                                    required
+                                />
+                            </div>
                         </div>
                     )}
 
-                    <Button
-                        type="submit"
-                        className="w-full py-6 text-lg rounded-xl mt-4"
-                        disabled={registerMutation.isPending || (role === "hospital" && hospitalStatus && !hospitalStatus.registrationOpen)}
-                    >
-                        {registerMutation.isPending
-                            ? "Creating Account..."
-                            : role === "hospital" && hospitalStatus && !hospitalStatus.registrationOpen
-                            ? "Registration Closed"
-                            : "Register Now"}
+                    <Button type="submit" className="w-full py-6 text-lg rounded-xl mt-4" disabled={registerMutation.isPending}>
+                        {registerMutation.isPending ? "Creating Account..." : "Register Now"}
                     </Button>
                 </form>
             </CardContent >
