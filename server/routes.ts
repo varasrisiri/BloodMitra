@@ -427,6 +427,19 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         return res.status(404).json({ message: "User not found" });
       }
 
+      // Create targeted in-app notification announcement for the verified donor
+      try {
+        await storage.createAnnouncement({
+          title: "Identity Verified",
+          message: `Congratulations! Your identity document has been verified by ${adminUser.name || "Hospital Administration"}. Your account is now fully approved for blood requests and donations.`,
+          createdBy: adminId,
+          targetUserId: id,
+          type: "notification",
+        });
+      } catch (annError) {
+        console.error("Failed to create verification announcement:", annError);
+      }
+
       res.json(verifiedUser);
     } catch (error) {
       console.error("Error verifying user:", error);
@@ -449,6 +462,19 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
 
       if (!rejectedUser) {
         return res.status(404).json({ message: "User not found" });
+      }
+
+      // Create targeted in-app notification announcement for the rejected donor
+      try {
+        await storage.createAnnouncement({
+          title: "Verification Rejected",
+          message: `Your identity document verification was reviewed and rejected by ${adminUser.name || "Hospital Administration"}. Please check that you submitted a valid government ID in PDF format or contact hospital support.`,
+          createdBy: adminId,
+          targetUserId: id,
+          type: "notification",
+        });
+      } catch (annError) {
+        console.error("Failed to create rejection announcement:", annError);
       }
 
       res.json(rejectedUser);

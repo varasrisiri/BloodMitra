@@ -18,7 +18,7 @@ import { ThemeToggle } from "@/components/ThemeToggle";
 import { DonorCard } from "@/components/DonorCard";
 import { RequestCard } from "@/components/RequestCard";
 import { BloodGroupBadge } from "@/components/BloodGroupBadge";
-import { AvailabilityBadge } from "@/components/StatusBadge";
+import { AvailabilityBadge, VerificationBadge } from "@/components/StatusBadge";
 import { AvailabilityToggle } from "@/components/AvailabilityToggle";
 import { StatsCard } from "@/components/StatsCard";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -41,7 +41,8 @@ import {
   Heart,
   Users,
   AlertCircle,
-  Megaphone
+  Megaphone,
+  Clock
 } from "lucide-react";
 import type { User, BloodRequest, BloodGroup, Announcement } from "@shared/schema";
 import { AnnouncementCard } from "@/components/AnnouncementCard";
@@ -133,6 +134,7 @@ function ProfileCard({ user, onToggleAvailability, isUpdating }: {
                     <BloodGroupBadge bloodGroup={user.bloodGroup} size="md" />
                   )}
                   <AvailabilityBadge available={user.availabilityStatus || false} />
+                  <VerificationBadge isVerified={user.isVerified || false} status={(user as any).verificationStatus} />
                 </div>
               </div>
 
@@ -804,8 +806,28 @@ export default function Home() {
       </header>
 
       <main className="container mx-auto px-4 py-6">
-
-
+        {(user as any).verificationStatus === "rejected" && (
+          <div className="mb-6 p-4 rounded-lg bg-red-50 border border-red-200 dark:bg-red-950/20 dark:border-red-900/40 flex items-start gap-3">
+            <AlertCircle className="h-5 w-5 text-red-600 dark:text-red-400 mt-0.5 shrink-0" />
+            <div>
+              <h4 className="text-sm font-semibold text-red-800 dark:text-red-300">Identity Verification Rejected</h4>
+              <p className="text-xs text-red-700 dark:text-red-400 mt-1">
+                Your submitted identity document was reviewed and rejected by hospital staff. Please check your Alerts tab for details or contact hospital support.
+              </p>
+            </div>
+          </div>
+        )}
+        {!user.isVerified && (user as any).verificationStatus !== "rejected" && (
+          <div className="mb-6 p-4 rounded-lg bg-amber-50 border border-amber-200 dark:bg-amber-950/20 dark:border-amber-900/40 flex items-start gap-3">
+            <Clock className="h-5 w-5 text-amber-600 dark:text-amber-400 mt-0.5 shrink-0" />
+            <div>
+              <h4 className="text-sm font-semibold text-amber-800 dark:text-amber-300">Identity Document Under Review</h4>
+              <p className="text-xs text-amber-700 dark:text-amber-400 mt-1">
+                Your submitted ID document is pending verification by a hospital administrator. You will be able to create blood requests and accept donation requests once verified.
+              </p>
+            </div>
+          </div>
+        )}
 
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
           {/* Left Column - Profile & Request */}

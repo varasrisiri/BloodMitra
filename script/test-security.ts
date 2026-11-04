@@ -51,6 +51,7 @@ async function runSecurityTestSuite() {
     const origDeleteDonorDocument = storage.deleteDonorDocument;
     const origUpdateUser = storage.updateUser;
     const origVerifyUser = storage.verifyUser;
+    const origRejectUser = storage.rejectUser;
     const origDeleteUser = storage.deleteUser;
 
     const mockUsers = new Map<string, User>();
@@ -88,7 +89,15 @@ async function runSecurityTestSuite() {
     storage.verifyUser = async (id) => {
         const u = mockUsers.get(id);
         if (!u) return undefined;
-        const updated = { ...u, isVerified: true };
+        const updated = { ...u, isVerified: true, verificationStatus: "verified" };
+        mockUsers.set(id, updated);
+        return updated;
+    };
+
+    storage.rejectUser = async (id) => {
+        const u = mockUsers.get(id);
+        if (!u) return undefined;
+        const updated = { ...u, isVerified: false, verificationStatus: "rejected" };
         mockUsers.set(id, updated);
         return updated;
     };
@@ -213,6 +222,22 @@ async function runSecurityTestSuite() {
             };
             mockUsers.set(newUser.id, newUser);
             return newUser;
+        };
+
+        const mockAnnouncements: any[] = [];
+        storage.createAnnouncement = async (annData: any) => {
+            const ann = {
+                id: `ann-${Date.now()}-${Math.random()}`,
+                ...annData,
+                createdAt: new Date(),
+            };
+            mockAnnouncements.push(ann);
+            return ann;
+        };
+        storage.getAnnouncements = async (_bloodGroup?: string, userId?: string) => {
+            return mockAnnouncements
+                .filter((a) => !a.targetUserId || a.targetUserId === userId)
+                .map((a) => ({ ...a, creatorName: "Mock Hospital" }));
         };
 
         // Create test PDF document file for streaming verification
@@ -577,6 +602,7 @@ async function runSecurityTestSuite() {
             });
             const donorValidBody = donorValidResp.ok ? await donorValidResp.json() : null;
             const validUserId = donorValidBody?.id;
+            const validUserCookie = donorValidResp.headers.get("set-cookie")?.split(";")[0] || "";
 
             recordTest(
                 "Donor registration with valid PDF succeeds (201, role: 'user', sanitized doc proxy)",
@@ -615,6 +641,20 @@ async function runSecurityTestSuite() {
                 `Status: ${verifyResp.status}, isVerified: ${verifyBody?.isVerified}`
             );
 
+            // In-App Notification check: Verified donor receives targeted announcement
+            const verifiedDonorAnnouncementsResp = await fetch(`${baseUrl}/api/announcements`, {
+                headers: { Cookie: validUserCookie },
+            });
+            const verifiedDonorAnnouncements = verifiedDonorAnnouncementsResp.ok ? await verifiedDonorAnnouncementsResp.json() : [];
+            const hasVerifyNotification = Array.isArray(verifiedDonorAnnouncements) && verifiedDonorAnnouncements.some(
+                (a: any) => a.targetUserId === validUserId && a.title === "Identity Verified"
+            );
+            recordTest(
+                "Hospital verification creates targeted in-app announcement for donor",
+                hasVerifyNotification,
+                `Announcements count: ${verifiedDonorAnnouncements.length}, Found targeted: ${hasVerifyNotification}`
+            );
+
             // Non-hospital user cannot verify donors
             const donorUnauthorizedVerify = await fetch(`${baseUrl}/api/hospital/users/${validUserId}/verify`, {
                 method: "PATCH",
@@ -624,6 +664,38 @@ async function runSecurityTestSuite() {
                 "Individual donor is rejected from verifying accounts (403)",
                 donorUnauthorizedVerify.status === 403,
                 `Status: ${donorUnauthorizedVerify.status}`
+            );
+
+            // Rejection workflow: Hospital admin rejects unverified donor
+            const unverifiedDonor: User = {
+                ...sensitiveUser,
+                id: "unverified-donor-to-reject",
+                username: "unverified_reject",
+                role: "user",
+                isVerified: false,
+                verificationStatus: "pending",
+                idDocumentUrl: "db://donor_documents/unverified-donor-to-reject",
+            };
+            mockUsers.set(unverifiedDonor.id, unverifiedDonor);
+
+            const rejectStatusResp = await fetch(`${baseUrl}/api/hospital/users/${unverifiedDonor.id}/reject`, {
+                method: "PATCH",
+                headers: { Cookie: hospCookie },
+            });
+            const rejectStatusBody = rejectStatusResp.ok ? await rejectStatusResp.json() : null;
+            recordTest(
+                "Hospital administrator rejects donor verification (PATCH /api/hospital/users/:id/reject -> 200, status: rejected)",
+                rejectStatusResp.status === 200 && (rejectStatusBody as any)?.verificationStatus === "rejected",
+                `Status: ${rejectStatusResp.status}, verificationStatus: ${(rejectStatusBody as any)?.verificationStatus}`
+            );
+
+            // In-App Notification check: Rejected donor receives targeted announcement
+            const rejectedDonorAnnouncements = mockAnnouncements.filter((a) => a.targetUserId === unverifiedDonor.id);
+            const hasRejectNotification = rejectedDonorAnnouncements.some((a) => a.title === "Verification Rejected");
+            recordTest(
+                "Hospital rejection creates targeted in-app announcement for donor",
+                hasRejectNotification,
+                `Targeted announcements count: ${rejectedDonorAnnouncements.length}, Found: ${hasRejectNotification}`
             );
 
             // Verified user cannot be deleted by hospital
@@ -637,24 +709,13 @@ async function runSecurityTestSuite() {
                 `Status: ${deleteVerifiedResp.status}`
             );
 
-            // Create an unverified user to test rejection/deletion workflow
-            const unverifiedDonor: User = {
-                ...sensitiveUser,
-                id: "unverified-donor-to-reject",
-                username: "unverified_reject",
-                role: "user",
-                isVerified: false,
-                idDocumentUrl: "db://donor_documents/unverified-donor-to-reject",
-            };
-            mockUsers.set(unverifiedDonor.id, unverifiedDonor);
-
             // Hospital admin rejects/deletes unverified user
             const rejectUnverifiedResp = await fetch(`${baseUrl}/api/hospital/users/${unverifiedDonor.id}`, {
                 method: "DELETE",
                 headers: { Cookie: hospCookie },
             });
             recordTest(
-                "Hospital administrator successfully rejects/deletes an unverified user (DELETE /api/hospital/users/:id -> 200)",
+                "Hospital administrator successfully deletes an unverified user (DELETE /api/hospital/users/:id -> 200)",
                 rejectUnverifiedResp.status === 200,
                 `Status: ${rejectUnverifiedResp.status}`
             );
@@ -758,6 +819,7 @@ async function runSecurityTestSuite() {
         storage.deleteDonorDocument = origDeleteDonorDocument;
         storage.updateUser = origUpdateUser;
         storage.verifyUser = origVerifyUser;
+        storage.rejectUser = origRejectUser;
         storage.deleteUser = origDeleteUser;
         await pool.end().catch(() => {});
     }

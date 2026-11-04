@@ -1,4 +1,5 @@
 import { Badge } from "@/components/ui/badge";
+import { CheckCircle, Clock, XCircle } from "lucide-react";
 import type { RequestStatus, RequestPriority } from "@shared/schema";
 
 interface StatusBadgeProps {
@@ -96,6 +97,51 @@ export function AvailabilityBadge({ available, className = "" }: AvailabilityBad
     >
       <span className="w-2 h-2 rounded-full bg-muted-foreground/50 mr-1.5" />
       Unavailable
+    </Badge>
+  );
+}
+
+interface VerificationBadgeProps {
+  isVerified?: boolean;
+  status?: string | null;
+  className?: string;
+}
+
+export function VerificationBadge({ isVerified, status, className = "" }: VerificationBadgeProps) {
+  if (isVerified || status === "verified") {
+    return (
+      <Badge
+        variant="outline"
+        className={`bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400 border-green-200 dark:border-green-800 flex items-center gap-1 ${className}`}
+        data-testid="badge-verification-verified"
+      >
+        <CheckCircle className="h-3 w-3 text-green-600 dark:text-green-400" />
+        Verified
+      </Badge>
+    );
+  }
+
+  if (status === "rejected") {
+    return (
+      <Badge
+        variant="outline"
+        className={`bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400 border-red-200 dark:border-red-800 flex items-center gap-1 ${className}`}
+        data-testid="badge-verification-rejected"
+      >
+        <XCircle className="h-3 w-3 text-red-600 dark:text-red-400" />
+        Rejected
+      </Badge>
+    );
+  }
+
+  return (
+    <Badge
+      variant="outline"
+      className={`bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-400 border-amber-200 dark:border-amber-800 flex items-center gap-1 ${className}`}
+      data-testid="badge-verification-pending"
+    >
+      <Clock className="h-3 w-3 text-amber-600 dark:text-amber-400" />
+      Pending Verification
     </Badge>
   );
 }
