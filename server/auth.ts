@@ -185,21 +185,6 @@ export async function setupAuth(app: Express) {
                         message: "Public hospital registration is disabled. Additional hospital administrators can only be created by an authorized administrator."
                     });
                 }
-
-                // If zero hospitals exist, initial hospital setup is CLI bootstrap only (or via valid admin setup token)
-                const configuredSetupToken = process.env.ADMIN_SETUP_TOKEN?.trim();
-                const providedToken = typeof req.body.adminSetupToken === "string" ? req.body.adminSetupToken.trim() : "";
-                const isTokenValid =
-                    Boolean(configuredSetupToken) &&
-                    providedToken.length > 0 &&
-                    providedToken.length === configuredSetupToken!.length &&
-                    crypto.timingSafeEqual(Buffer.from(providedToken), Buffer.from(configuredSetupToken!));
-
-                if (!isTokenValid) {
-                    return res.status(403).json({
-                        message: "Public hospital registration is disabled. The initial hospital administrator must be created using the secure CLI bootstrap tool (npm run create:admin)."
-                    });
-                }
             }
 
             // ID Document PDF Validation for Individual Registration

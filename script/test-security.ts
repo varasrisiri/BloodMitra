@@ -414,46 +414,48 @@ async function runSecurityTestSuite() {
                 `Status: ${blockWhenExistsResp.status}`
             );
 
-            // Scenario B: Zero hospitals exist -> Bootstrap token validation
+            // Scenario B: Zero hospitals exist -> Initial hospital administrator web registration
             mockHospitalCount = 0;
 
-            const formMissingToken = new FormData();
-            formMissingToken.append("username", "admin1");
-            formMissingToken.append("password", "Password123!");
-            formMissingToken.append("role", "hospital");
-            formMissingToken.append("name", "First Hospital");
-            formMissingToken.append("email", "admin1@hospital.org");
-            formMissingToken.append("phone", "9000000000");
-            formMissingToken.append("location", "City");
+            const formFirstHospital = new FormData();
+            formFirstHospital.append("username", "first_hospital_admin");
+            formFirstHospital.append("password", "Password123!");
+            formFirstHospital.append("role", "hospital");
+            formFirstHospital.append("name", "First City Hospital");
+            formFirstHospital.append("email", "admin1@hospital.org");
+            formFirstHospital.append("phone", "9000000000");
+            formFirstHospital.append("location", "City");
 
-            const missingTokenResp = await fetch(`${baseUrl}/api/register`, {
+            const firstHospitalResp = await fetch(`${baseUrl}/api/register`, {
                 method: "POST",
-                body: formMissingToken,
+                body: formFirstHospital,
             });
+            const firstHospitalBody = firstHospitalResp.ok ? await firstHospitalResp.json() : null;
             recordTest(
-                "First-admin hospital registration without setup token is rejected (403)",
-                missingTokenResp.status === 403,
-                `Status: ${missingTokenResp.status}`
+                "First-admin hospital registration succeeds via web form when 0 hospitals exist (201, role: 'hospital')",
+                firstHospitalResp.status === 201 && firstHospitalBody?.role === "hospital" && firstHospitalBody?.isVerified === true,
+                `Status: ${firstHospitalResp.status}, role: ${firstHospitalBody?.role}, isVerified: ${firstHospitalBody?.isVerified}`
             );
 
-            const formWrongToken = new FormData();
-            formWrongToken.append("username", "admin1");
-            formWrongToken.append("password", "Password123!");
-            formWrongToken.append("role", "hospital");
-            formWrongToken.append("name", "First Hospital");
-            formWrongToken.append("email", "admin1@hospital.org");
-            formWrongToken.append("phone", "9000000000");
-            formWrongToken.append("location", "City");
-            formWrongToken.append("adminSetupToken", "wrong-secret-token");
+            // Once the first hospital exists, subsequent public registrations are locked
+            mockHospitalCount = 1;
+            const formSecondHospital = new FormData();
+            formSecondHospital.append("username", "second_hospital_attempt");
+            formSecondHospital.append("password", "Password123!");
+            formSecondHospital.append("role", "hospital");
+            formSecondHospital.append("name", "Second Hospital Attempt");
+            formSecondHospital.append("email", "admin2@hospital.org");
+            formSecondHospital.append("phone", "9000000002");
+            formSecondHospital.append("location", "City 2");
 
-            const wrongTokenResp = await fetch(`${baseUrl}/api/register`, {
+            const secondHospitalResp = await fetch(`${baseUrl}/api/register`, {
                 method: "POST",
-                body: formWrongToken,
+                body: formSecondHospital,
             });
             recordTest(
-                "First-admin hospital registration with incorrect token is rejected (403)",
-                wrongTokenResp.status === 403,
-                `Status: ${wrongTokenResp.status}`
+                "Subsequent public hospital registration is locked after first admin exists (403)",
+                secondHospitalResp.status === 403,
+                `Status: ${secondHospitalResp.status}`
             );
 
             // --- Test Simultaneous First-Admin Registration (Race Condition Defense) ---
@@ -486,7 +488,6 @@ async function runSecurityTestSuite() {
             formSim1.append("email", "hosp1@example.com");
             formSim1.append("phone", "9000000001");
             formSim1.append("location", "City A");
-            formSim1.append("adminSetupToken", process.env.ADMIN_SETUP_TOKEN!);
 
             const formSim2 = new FormData();
             formSim2.append("username", "simultaneous_admin_2");
@@ -496,7 +497,6 @@ async function runSecurityTestSuite() {
             formSim2.append("email", "hosp2@example.com");
             formSim2.append("phone", "9000000002");
             formSim2.append("location", "City B");
-            formSim2.append("adminSetupToken", process.env.ADMIN_SETUP_TOKEN!);
 
             const [simResp1, simResp2] = await Promise.all([
                 fetch(`${baseUrl}/api/register`, { method: "POST", body: formSim1 }),
