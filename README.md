@@ -33,7 +33,7 @@
   * 🟡 **Pending Verification** (Under review)
   * 🔴 **Verification Rejected** (Reason provided via in-app alert)
 * **Availability Toggle:** One-click toggle allowing donors to declare themselves available or unavailable for donations.
-* **Request Lifecycle:** Create, accept, track, and complete emergency or routine blood requests with real-time donor matches.
+* **Request Lifecycle:** Create, accept, track, and complete emergency or routine blood requests with real-time donor matches..
 
 ### 🏥 For Hospitals & Healthcare Centers
 * **Live Blood Stock Inventory:** Real-time tracking and updating of available units across all 8 blood groups (`A+`, `A-`, `B+`, `B-`, `O+`, `O-`, `AB+`, `AB-`).
