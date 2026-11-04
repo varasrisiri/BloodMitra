@@ -5,7 +5,12 @@
 [![React](https://img.shields.io/badge/React-18-61dafb?style=for-the-badge&logo=react)](https://react.dev/)
 [![Tailwind CSS](https://img.shields.io/badge/Tailwind-3.4-38bdf8?style=for-the-badge&logo=tailwind-css)](https://tailwindcss.com/)
 [![PostgreSQL](https://img.shields.io/badge/PostgreSQL-Neon-336791?style=for-the-badge&logo=postgresql)](https://neon.tech/)
-[![License](https://img.shields.io/badge/License-MIT-green?style=for-the-badge)](LICENSE)
+[![Proprietary](https://img.shields.io/badge/License-Proprietary%20%7C%20All%20Rights%20Reserved-red?style=for-the-badge)](#-license--terms-of-use)
+
+> ⚠️ **PROPRIETARY & CONFIDENTIAL – ALL RIGHTS RESERVED**  
+> This repository and its codebase are the private intellectual property of **varasrisiri**.  
+> **No permission is granted to download, clone, copy, fork, modify, redistribute, or use this source code for any personal, educational, or commercial purposes.**  
+> This project is published solely for portfolio viewing and presentation.
 
 > **Every drop counts. Every second matters.**  
 > BloodMitra is a full-stack, real-time blood donation and hospital inventory platform connecting donors, recipients, and hospitals to eliminate critical delays in emergency blood procurement.
@@ -158,9 +163,15 @@ npm run build
 
 ---
 
-## 📄 License
+## 📄 License & Terms of Use
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+**Copyright © 2026 varasrisiri. All Rights Reserved.**
+
+This software and its documentation are proprietary and confidential.
+
+* **No License Granted:** No license, express or implied, is granted to any person obtaining a copy of this repository.
+* **Prohibited Actions:** You may **not** download, clone, fork, reproduce, modify, distribute, sublicense, sell, or deploy this code, in whole or in part, without prior explicit written permission from the copyright owner.
+* **Intended Use:** This repository is made visible exclusively for demonstration and portfolio inspection.
 
 ---
 
